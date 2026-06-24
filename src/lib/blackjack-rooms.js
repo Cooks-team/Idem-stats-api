@@ -164,6 +164,7 @@ function makeSeat(user) {
     avatarUrl: user.avatarUrl ?? null,
     bet: 0,
     insuranceBet: 0,
+    insuranceDecided: false,
     hands: [],
     handBets: [],
     handStatus: [],
@@ -202,6 +203,11 @@ function openBetting(room) {
     if (!seat) continue;
     seat.bet = 0;
     seat.insuranceBet = 0;
+    seat.insuranceDecided = false; // CRITIQUE : sans ça, un user qui avait
+    // déjà répondu à une assurance au round N gardait insuranceDecided=true
+    // au round N+1. Résultat : maybeFinishInsurance le considérait
+    // "décidé" et passait la phase 'insurance' direct vers 'playing'
+    // sans lui laisser le temps de cliquer.
     seat.hands = [];
     seat.handBets = [];
     seat.handStatus = [];

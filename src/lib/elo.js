@@ -22,8 +22,21 @@
 // Snake gagnée à 1320 → global tiré vers Pong (50/(50+1) = 98%), pas 50/50.
 
 export const INITIAL_ELO = 1300;
-export const K_NEWBIE = 40;        // < 20 matchs sur le jeu
-export const K_ESTABLISHED = 24;   // 20+ matchs
+// K-factor pour les NEWBIES (<20 matchs sur le jeu). Volontairement gros pour
+// que les premiers matchs placent vite le joueur autour de son vrai niveau.
+export const K_NEWBIE = 48;
+// K-factor pour les ESTABLISHED (20+ matchs sur le jeu).
+export const K_ESTABLISHED = 32;
+// MULTIPLICATEURS ASYMÉTRIQUES — récompense le grind :
+//   - Une victoire rapporte K * (1 - expected) * WIN_BOOST  (gros gain)
+//   - Une défaite coûte    K * expected      * LOSS_DAMPEN  (petite perte)
+// L'ELO global n'est plus zero-sum, ce qui est voulu : un joueur actif
+// qui gagne autant qu'il perd voit son ELO monter doucement, motivant le
+// jeu. Pour une partie totalement équilibrée (expected = 0.5) :
+//   K=32, WIN_BOOST=1.25, LOSS_DAMPEN=0.6 → win = +20, loss = -10  ⇒ net +5/2matchs
+//   K=48 (newbie)                          → win = +30, loss = -14 ⇒ net +8/2matchs
+export const WIN_BOOST = 1.25;
+export const LOSS_DAMPEN = 0.6;
 
 export function expectedScore(ratingA, ratingB) {
   return 1 / (1 + Math.pow(10, (ratingB - ratingA) / 400));
@@ -33,14 +46,22 @@ function kFactor(gamesPlayed) {
   return gamesPlayed < 20 ? K_NEWBIE : K_ESTABLISHED;
 }
 
+/** Delta asymétrique : positif (win) boosté, négatif (loss) atténué.
+ *  Une égalité reste neutre (scoreDiff = 0 → delta = 0). */
+function asymmetricDelta(k, scoreDiff) {
+  if (scoreDiff > 0) return k * scoreDiff * WIN_BOOST;
+  if (scoreDiff < 0) return k * scoreDiff * LOSS_DAMPEN;
+  return 0;
+}
+
 /** Renvoie {newA, newB, deltaA, deltaB}. scoreA = 1 win, 0 loss, 0.5 draw. */
 export function updateRatings(ratingA, ratingB, scoreA, gamesPlayedA = 0, gamesPlayedB = 0) {
   const expA = expectedScore(ratingA, ratingB);
   const expB = 1 - expA;
   const kA = kFactor(gamesPlayedA);
   const kB = kFactor(gamesPlayedB);
-  const newA = Math.round(ratingA + kA * (scoreA - expA));
-  const newB = Math.round(ratingB + kB * ((1 - scoreA) - expB));
+  const newA = Math.round(ratingA + asymmetricDelta(kA, scoreA - expA));
+  const newB = Math.round(ratingB + asymmetricDelta(kB, (1 - scoreA) - expB));
   return { newA, newB, deltaA: newA - ratingA, deltaB: newB - ratingB };
 }
 
@@ -120,18 +141,33 @@ export function computeGlobalElos(ratings) {
 }
 
 // Tiers de rank — barème custom maison. Ascending order strictly required.
-// Paliers resserrés (~150-200 pts) pour qu'on passe d'un rank à l'autre
-// en ~6-10 victoires (avec K=32, ~15-20 ELO/win net). Spawn = INITIAL_ELO
-// (1300) → MILIEU du tier Sharknado, le "joueur lambda". Pour monter c'est
-// Goat → Tigrao → Canigoat. Pour descendre c'est Guez Merguez → Pue sa GM.
+// 8 tiers compactés autour du spawn 1300 (= MILIEU du tier Sharknado, le
+// "joueur lambda"). Au-dessus = Goat / Tigrao / Canigoat / Gwermaster.
+// En-dessous = Guez merguez / Pue sa mère / Oh mon dieu.
+// Les paliers sont volontairement serrés (50-150 pts) pour qu'un grind
+// régulier débloque visiblement des ranks.
 const TIERS = [
-  { min: 0,    name: 'Pue sa grand mère', color: '#8B5A3C', emoji: '💩' },
-  { min: 1000, name: 'Guez Merguez',      color: '#FF8C42', emoji: '🌭' },
-  { min: 1200, name: 'Sharknado',         color: '#38B0FF', emoji: '🦈' }, // spawn 1300 ici
-  { min: 1400, name: 'Goat',              color: '#F0F0F0', emoji: '🐐' },
-  { min: 1550, name: 'Tigrao',            color: '#B026FF', emoji: '🐅' },
-  { min: 1700, name: 'Canigoat',          color: '#FFD700', emoji: '🏆' },
+  { min: 0,    name: 'Oh mon dieu',  color: '#5C3320', emoji: '💀' },
+  { min: 1001, name: 'Pue sa mère',  color: '#8B5A3C', emoji: '💩' },
+  { min: 1151, name: 'Guez merguez', color: '#FF8C42', emoji: '🌭' },
+  { min: 1251, name: 'Sharknado',    color: '#38B0FF', emoji: '🦈' }, // spawn 1300 ici
+  { min: 1350, name: 'Goat',         color: '#F0F0F0', emoji: '🐐' },
+  { min: 1400, name: 'Tigrao',       color: '#B026FF', emoji: '🐅' },
+  { min: 1450, name: 'Canigoat',     color: '#FFD700', emoji: '🏆' },
+  { min: 1500, name: 'Gwermaster',   color: '#FF3D9C', emoji: '👑' },
 ];
+
+/** Liste publique des tiers — exposée par l'endpoint /elo/tiers pour que la
+ *  page d'explication côté front soit toujours alignée avec le serveur. */
+export function listTiers() {
+  return TIERS.map((t, i) => ({
+    name: t.name,
+    color: t.color,
+    emoji: t.emoji,
+    min: t.min,
+    max: i + 1 < TIERS.length ? TIERS[i + 1].min - 1 : null, // null = pas de plafond
+  }));
+}
 
 /** Retourne { name, color, emoji, min, nextMin } pour un ELO donné. */
 export function rankFromElo(elo) {

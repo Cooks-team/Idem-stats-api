@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../db/prisma.js';
 import { requireAuth } from '../middleware/auth.js';
-import { computeElos, computeGlobalElos, rankFromElo, INITIAL_ELO } from '../lib/elo.js';
+import { computeElos, computeGlobalElos, rankFromElo, INITIAL_ELO, listTiers } from '../lib/elo.js';
 
 const router = Router();
 
@@ -84,6 +84,13 @@ router.get('/', requireAuth, async (req, res) => {
     || a.user.pseudo.localeCompare(b.user.pseudo),
   );
   res.json(entries);
+});
+
+// GET /leaderboard/tiers — barème public des ranks ELO. Sert à la page
+// d'explication des ranks côté front. Pas d'auth requise (juste pour
+// rester cohérent on garde requireAuth — c'est de l'app interne).
+router.get('/tiers', requireAuth, (_req, res) => {
+  res.json({ initialElo: INITIAL_ELO, tiers: listTiers() });
 });
 
 export default router;
